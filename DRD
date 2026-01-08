@@ -1,0 +1,7 @@
+# Disable Remote Desktop
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 1
+
+# Optionally, stop the Remote Desktop Services (TermService)
+Stop-Service -Name "TermService" -Force
+
+Write-Host "Remote Desktop Services have been deactivated."
