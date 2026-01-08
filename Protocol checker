@@ -1,0 +1,194 @@
+# ==============================
+# SAFE Helper function to stop + disable a service
+# ==============================
+function Disable-ServiceIfExists {
+    param(
+        [string]$ServiceName
+    )
+
+    # Protected core Windows services (NEVER stop/disable)
+    $protected = @(
+        "WinHttpAutoProxySvc", # WinHTTP Web Proxy Auto-Discovery
+        "EventLog",
+        "Winmgmt",
+        "SamSs",
+        "LSM",
+        "RpcSs",
+        "DcomLaunch",
+        "PlugPlay"
+    )
+
+    if ($protected -contains $ServiceName) {
+        Write-Host "Skipping protected system service: $ServiceName" -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        $svc = Get-Service -Name $ServiceName -ErrorAction Stop
+
+        # Attempt to stop the service
+        if ($svc.Status -eq "Running") {
+            try {
+                Write-Host "Stopping service: $ServiceName ..." -ForegroundColor Yellow
+                Stop-Service -Name $ServiceName -Force -ErrorAction Stop
+            } catch {
+                Write-Host "Cannot stop service: $ServiceName (system-protected or denied)" -ForegroundColor Yellow
+            }
+        }
+
+        # Attempt to disable it
+        try {
+            Write-Host "Setting startup type to Disabled: $ServiceName ..." -ForegroundColor Yellow
+            Set-Service -Name $ServiceName -StartupType Disabled -ErrorAction Stop
+        } catch {
+            Write-Host "Cannot change startup type for: $ServiceName (system-protected or denied)" -ForegroundColor Yellow
+        }
+
+    } catch {
+        # Service not installed
+        return
+    }
+}
+
+# ==============================
+# SMB CHECK
+# ==============================
+function Check-SMB {
+    if ($smbStatus.Installed) {
+        Write-Host "SMBv1 is enabled. NOT SECURE" -ForegroundColor Red
+        Disable-ServiceIfExists -ServiceName "LanmanServer"
+    } else {
+        Write-Host "SMBv1 is disabled. SECURE" -ForegroundColor Green
+    }
+    
+    if ($smb2Status -eq 0) {
+        Write-Host "SMBv2 and SMBv3 are disabled. NOT SECURE" -ForegroundColor Red
+    } else {
+        Write-Host "SMBv2 and SMBv3 are enabled. SECURE" -ForegroundColor Green
+    }
+}
+
+# ==============================
+# RDP CHECK ONLY (DO NOT DISABLE)
+# ==============================
+function Check-RDP {
+    $rdpStatus = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections"
+    if ($rdpStatus.fDenyTSConnections -eq 1) {
+        Write-Host "Remote Desktop Protocol (RDP) is disabled. SECURE" -ForegroundColor Green
+    } else {
+        Write-Host "RDP is enabled. NOT SECURE." -ForegroundColor Yellow
+    }
+}
+
+# ==============================
+# TELNET / FTP / HTTP
+# Auto-stop + disable
+# ==============================
+function Check-InsecureProtocols {
+    $insecureProtocols = @("Telnet", "FTP", "HTTP")
+
+    foreach ($protocol in $insecureProtocols) {
+
+        # Avoid catching system HTTP services
+        $service = Get-Service | Where-Object {
+            $_.DisplayName -like "*$protocol*" -and
+            $_.Name -notlike "WinHttpAutoProxySvc"
+        }
+
+        if ($service) {
+            foreach ($svc in $service) {
+                Write-Host "$($svc.DisplayName) is running. NOT SECURE" -ForegroundColor Red
+                Disable-ServiceIfExists -ServiceName $svc.Name
+            }
+        } else {
+            Write-Host "$protocol service is not running. SECURE" -ForegroundColor Green
+        }
+    }
+}
+
+# ==============================
+# IIS WWW Publishing Service
+# ==============================
+function Check-WWWPublishingService {
+    try {
+        $wwwService = Get-Service -Name "W3SVC" -ErrorAction Stop
+
+        if ($wwwService.Status -eq "Running") {
+            Write-Host "World Wide Web Publishing Service (W3SVC) is running. NOT SECURE" -ForegroundColor Red
+            Disable-ServiceIfExists -ServiceName "W3SVC"
+        }
+        else {
+            Write-Host "World Wide Web Publishing Service (W3SVC) is not running. SECURE" -ForegroundColor Green
+        }
+
+    } catch {
+        Write-Host "World Wide Web Publishing Service (W3SVC) is not installed." -ForegroundColor Yellow
+    }
+}
+
+# ==============================
+# SMTP Detection + Auto-Disable
+# ==============================
+function Check-SMTP {
+
+    $smtpServices = @(
+        "SMTPSVC",
+        "MSExchangeTransport",
+        "MSExchangeFrontEndTransport"
+    )
+
+    $smtpFound = $false
+
+    foreach ($svcName in $smtpServices) {
+        try {
+            $svc = Get-Service -Name $svcName -ErrorAction Stop
+            $smtpFound = $true
+
+            $startup = (Get-WmiObject Win32_Service -Filter "Name='$svcName'").StartMode
+            $isRunning = $svc.Status -eq "Running"
+
+            if ($isRunning -or $startup -eq "Auto") {
+                Write-Host "$($svc.DisplayName) is running or Automatic. NOT SECURE" -ForegroundColor Red
+                Disable-ServiceIfExists -ServiceName $svcName
+            } else {
+                Write-Host "$($svc.DisplayName) is not running. SECURE" -ForegroundColor Green
+            }
+
+        } catch {}
+    }
+
+    if (-not $smtpFound) {
+        $generic = Get-Service | Where-Object {
+            $_.DisplayName -like "*SMTP*" -or $_.Name -like "*SMTP*"
+        }
+
+        if ($generic) {
+            foreach ($svc in $generic) {
+                $startup = (Get-WmiObject Win32_Service -Filter "Name='$($svc.Name)'").StartMode
+                $isRunning = $svc.Status -eq "Running"
+
+                if ($isRunning -or $startup -eq "Auto") {
+                    Write-Host "$($svc.DisplayName) is running or Automatic. NOT SECURE" -ForegroundColor Red
+                    Disable-ServiceIfExists -ServiceName $svc.Name
+                } else {
+                    Write-Host "$($svc.DisplayName) is not running. SECURE" -ForegroundColor Green
+                }
+            }
+        } else {
+            Write-Host "SMTP service is not installed. SECURE" -ForegroundColor Green
+        }
+    }
+}
+
+# ==============================
+# MAIN EXECUTION
+# ==============================
+Write-Host "Checking network protocols for vulnerabilities..." -ForegroundColor Cyan
+
+Check-SMB
+Check-RDP            # Detection only
+Check-InsecureProtocols
+Check-WWWPublishingService
+Check-SMTP
+
+Write-Host "Network protocol check complete." -ForegroundColor Cyan
