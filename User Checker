@@ -1,0 +1,25 @@
+# Paste your authorized users here (one per line)
+$authorizedUsers = @"
+REPLACE_WITH_USERS
+
+"@ -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+
+# Get all local users on the machine
+$localUsers = Get-LocalUser | Select-Object -ExpandProperty Name
+
+# Compare actual vs authorized
+$unauthorizedUsers = $localUsers | Where-Object { $_ -notin $authorizedUsers }
+
+Write-Host "===== Local User Audit Report =====" -ForegroundColor Cyan
+Write-Host "Authorized Users:" -ForegroundColor Green
+$authorizedUsers | ForEach-Object { Write-Host "  $_" -ForegroundColor Green }
+
+Write-Host "`nCurrent Local Users:" -ForegroundColor Yellow
+$localUsers | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+
+if ($unauthorizedUsers) {
+    Write-Host "`nUnauthorized Users Found:" -ForegroundColor Red
+    $unauthorizedUsers | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+} else {
+    Write-Host "`nNo unauthorized users found." -ForegroundColor Green
+}
