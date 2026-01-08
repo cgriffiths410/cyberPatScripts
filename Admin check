@@ -1,0 +1,38 @@
+# Manual list of expected admins (edit this list)
+$manualAdminList = @(
+   REPLACE_WITH_ADMINS
+)
+
+# Get the local Administrators group
+$adminGroup = [ADSI]"WinNT://./Administrators,group"
+
+# Initialize an array to hold the admin users from the OS
+$osAdminUsers = @()
+
+# Loop through each member of the Administrators group from the OS
+foreach ($member in $adminGroup.Invoke("Members")) {
+    # Get the name of the member
+    $adminUser = $member.GetType().InvokeMember("Name", "GetProperty", $null, $member, $null)
+    
+    # Add the admin user to the OS admin users array
+    $osAdminUsers += $adminUser
+}
+
+# Compare lists
+$validAdmins = $osAdminUsers | Where-Object { $manualAdminList -contains $_ }
+$notRealAdmins = $osAdminUsers | Where-Object { $manualAdminList -notcontains $_ }
+
+# Display the results with color
+Write-Host "AUTHORIZED ADMINS:" -ForegroundColor Green
+if ($validAdmins.Count -gt 0) {
+    $validAdmins | ForEach-Object { Write-Host "- $_" -ForegroundColor Green }
+} else {
+    Write-Host "None found." -ForegroundColor Green
+}
+
+Write-Host "`nUNAUTHORIZED ADMINS:" -ForegroundColor Red
+if ($notRealAdmins.Count -gt 0) {
+    $notRealAdmins | ForEach-Object { Write-Host "- $_" -ForegroundColor Red }
+} else {
+    Write-Host "None found." -ForegroundColor Red
+}
