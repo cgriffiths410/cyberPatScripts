@@ -1,0 +1,63 @@
+# ==========================================
+# Shared Folder & Hidden Item Audit Script
+# ==========================================
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "FIRST OUTPUT SECTION: NON-DEFAULT SMB SHARES" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+
+# Get SMB shares excluding default administrative shares
+$ExcludedShares = @("ADMIN$", "C$", "IPC$")
+
+$Shares = Get-SmbShare | Where-Object {
+    $_.Name -notin $ExcludedShares -and $_.ShareState -eq "Online"
+}
+
+if ($Shares.Count -eq 0) {
+    Write-Host "No non-default SMB shares found." -ForegroundColor Yellow
+} else {
+    foreach ($Share in $Shares) {
+        Write-Host "`nShare Name: $($Share.Name)" -ForegroundColor Green
+        Write-Host "Path: $($Share.Path)" -ForegroundColor Gray
+
+        if (Test-Path $Share.Path) {
+            try {
+                Get-ChildItem -Path $Share.Path -Recurse -Force -ErrorAction Stop |
+                Select-Object FullName, Attributes
+            } catch {
+                Write-Host "Access denied or error reading contents." -ForegroundColor Red
+            }
+        } else {
+            Write-Host "Share path does not exist." -ForegroundColor Red
+        }
+    }
+}
+
+# ==========================================
+# SECOND OUTPUT SECTION
+# ==========================================
+
+Write-Host "SECOND OUTPUT SECTION: HIDDEN FILES, FOLDERS & DRIVES" -ForegroundColor Cyan
+
+
+# Hidden Drives
+Write-Host "`n--- Hidden Drives ---" -ForegroundColor Green
+Get-PSDrive -PSProvider FileSystem |
+Where-Object { $_.Root -and (Get-Item $_.Root -Force).Attributes -match "Hidden" } |
+Select-Object Name, Root
+
+# Hidden Files and Folders
+Write-Host "`n--- Hidden Files and Folders ---" -ForegroundColor Green
+
+$Drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -ne $null }
+
+foreach ($Drive in $Drives) {
+    Write-Host "`nScanning Drive: $($Drive.Name):\" -ForegroundColor Gray
+    try {
+        Get-ChildItem "$($Drive.Name):\" -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Attributes -match "Hidden" } |
+        Select-Object FullName, Attributes
+    } catch {
+        Write-Host "Error scanning drive $($Drive.Name)" -ForegroundColor Red
+    }
+}
