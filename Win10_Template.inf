@@ -190,3 +190,5 @@ MACHINE\System\CurrentControlSet\Services\FTPSVC\Start=4,4
 MACHINE\Software\Policies\Microsoft\Windows\WindowsUpdate\AU\NoAutoUpdate=4,0
 MACHINE\Software\Policies\Microsoft\Windows\WindowsUpdate\AU\AUOptions=4,4
 
+; --- Advanced Audit: System ---
+MACHINE\Software\Policies\Microsoft\Windows\Audit\AuditSecurityStateChange=4,1
