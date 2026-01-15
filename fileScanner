@@ -1,12 +1,7 @@
-# ==========================================
-# Shared Folder & Hidden Item Audit Script
-# ==========================================
-
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "FIRST OUTPUT SECTION: NON-DEFAULT SMB SHARES" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
-# Get SMB shares excluding default administrative shares
 $ExcludedShares = @("ADMIN$", "C$", "IPC$")
 
 $Shares = Get-SmbShare | Where-Object {
@@ -33,21 +28,21 @@ if ($Shares.Count -eq 0) {
     }
 }
 
-# ==========================================
-# SECOND OUTPUT SECTION
-# ==========================================
+Write-Host "`n==========================================" -ForegroundColor Cyan
+Write-Host "SECOND OUTPUT SECTION: HIDDEN FILES (FILTERED EXTENSIONS)" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
 
-Write-Host "SECOND OUTPUT SECTION: HIDDEN FILES, FOLDERS & DRIVES" -ForegroundColor Cyan
+$AllowedExtensions = @(".exe", ".txt", ".csv", ".wav", ".zip")
+$ExcludedPath = "C:\CyberPatriot"
 
-
-# Hidden Drives
 Write-Host "`n--- Hidden Drives ---" -ForegroundColor Green
 Get-PSDrive -PSProvider FileSystem |
-Where-Object { $_.Root -and (Get-Item $_.Root -Force).Attributes -match "Hidden" } |
+Where-Object {
+    $_.Root -and (Get-Item $_.Root -Force -ErrorAction SilentlyContinue).Attributes -match "Hidden"
+} |
 Select-Object Name, Root
 
-# Hidden Files and Folders
-Write-Host "`n--- Hidden Files and Folders ---" -ForegroundColor Green
+Write-Host "`n--- Hidden Files with Allowed Extensions (Excluding C:\CyberPatriot) ---" -ForegroundColor Green
 
 $Drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -ne $null }
 
@@ -55,9 +50,15 @@ foreach ($Drive in $Drives) {
     Write-Host "`nScanning Drive: $($Drive.Name):\" -ForegroundColor Gray
     try {
         Get-ChildItem "$($Drive.Name):\" -Recurse -Force -ErrorAction SilentlyContinue |
-        Where-Object { $_.Attributes -match "Hidden" } |
-        Select-Object FullName, Attributes
+        Where-Object {
+            -not $_.PSIsContainer -and
+            $_.Attributes -match "Hidden" -and
+            $AllowedExtensions -contains $_.Extension.ToLower() -and
+            $_.FullName -notlike "$ExcludedPath*"
+        } |
+        Select-Object FullName, Extension, Attributes
     } catch {
         Write-Host "Error scanning drive $($Drive.Name)" -ForegroundColor Red
     }
 }
+
