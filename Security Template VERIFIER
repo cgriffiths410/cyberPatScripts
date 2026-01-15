@@ -1,0 +1,135 @@
+# ===============================
+# CyberPatriot Policy Verification Script
+# Windows 11 / Windows Server
+# ===============================
+
+Write-Host "`n=== CyberPatriot Security Policy Verification ===`n" -ForegroundColor Cyan
+
+function Test-Reg {
+    param ($Path, $Name, $Expected)
+    try {
+        $value = (Get-ItemProperty -Path $Path -Name $Name -ErrorAction Stop).$Name
+        if ($value -eq $Expected) {
+            Write-Host "[PASS] $Path\$Name = $value" -ForegroundColor Green
+        } else {
+            Write-Host "[FAIL] $Path\$Name = $value (Expected $Expected)" -ForegroundColor Red
+        }
+    } catch {
+        Write-Host "[FAIL] $Path\$Name not found" -ForegroundColor Red
+    }
+}
+
+function Test-Service {
+    param ($Service, $Expected)
+    $svc = Get-Service -Name $Service -ErrorAction SilentlyContinue
+    if ($svc) {
+        if ($svc.StartType -eq $Expected) {
+            Write-Host "[PASS] Service $Service is $Expected" -ForegroundColor Green
+        } else {
+            Write-Host "[FAIL] Service $Service is $($svc.StartType) (Expected $Expected)" -ForegroundColor Red
+        }
+    } else {
+        Write-Host "[INFO] Service $Service not installed" -ForegroundColor Yellow
+    }
+}
+
+function Test-FirewallProfile {
+    param ($Profile)
+    $fw = Get-NetFirewallProfile -Profile $Profile
+    if ($fw.Enabled -and $fw.DefaultInboundAction -eq "Block") {
+        Write-Host "[PASS] Firewall $Profile enabled, inbound blocked" -ForegroundColor Green
+    } else {
+        Write-Host "[FAIL] Firewall $Profile misconfigured" -ForegroundColor Red
+    }
+}
+
+# ===============================
+# PASSWORD POLICY
+# ===============================
+Write-Host "`n--- Password Policy ---" -ForegroundColor Cyan
+secedit /export /cfg $env:TEMP\secpol.cfg | Out-Null
+$secpol = Get-Content "$env:TEMP\secpol.cfg"
+
+function Test-Secpol {
+    param ($Name, $Expected)
+    $line = $secpol | Where-Object { $_ -match "^$Name\s*=" }
+    if ($line -match "=\s*$Expected") {
+        Write-Host "[PASS] $Name = $Expected" -ForegroundColor Green
+    } else {
+        Write-Host "[FAIL] $Name incorrect or missing" -ForegroundColor Red
+    }
+}
+
+Test-Secpol "MinimumPasswordLength" 14
+Test-Secpol "MaximumPasswordAge" 60
+Test-Secpol "PasswordComplexity" 1
+Test-Secpol "PasswordHistorySize" 24
+Test-Secpol "LockoutBadCount" 5
+
+# ===============================
+# NTLM / LSA HARDENING
+# ===============================
+Write-Host "`n--- NTLM / LSA Hardening ---" -ForegroundColor Cyan
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" "NoLMHash" 1
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" "LmCompatibilityLevel" 5
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" "RestrictAnonymous" 1
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" "RestrictAnonymousSAM" 1
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" "TurnOffAnonymousBlock" 1
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" "RunAsPPL" 1
+
+# ===============================
+# SMB HARDENING
+# ===============================
+Write-Host "`n--- SMB Hardening ---" -ForegroundColor Cyan
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" "SMB1" 0
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Services\LanManWorkstation\Parameters" "AllowInsecureGuestAuth" 0
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" "RequireSecuritySignature" 1
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Services\LanManWorkstation\Parameters" "RequireSecuritySignature" 1
+
+# ===============================
+# WINDOWS DEFENDER
+# ===============================
+Write-Host "`n--- Windows Defender ---" -ForegroundColor Cyan
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows Defender" "DisableAntiSpyware" 0
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows Defender" "DisableRealtimeMonitoring" 0
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows Defender\Spynet" "SpynetReporting" 2
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows Defender\Spynet" "SubmitSamplesConsent" 1
+
+# ===============================
+# FIREWALL
+# ===============================
+Write-Host "`n--- Firewall ---" -ForegroundColor Cyan
+Test-FirewallProfile "Domain"
+Test-FirewallProfile "Private"
+Test-FirewallProfile "Public"
+
+# ===============================
+# RDP HARDENING
+# ===============================
+Write-Host "`n--- RDP Hardening ---" -ForegroundColor Cyan
+Test-Reg "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "UserAuthentication" 1
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows NT\Terminal Services" "fDisableClip" 1
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows NT\Terminal Services" "fDisableCdm" 1
+
+# ===============================
+# POWERSHELL LOGGING
+# ===============================
+Write-Host "`n--- PowerShell Logging ---" -ForegroundColor Cyan
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" "EnableScriptBlockLogging" 1
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows\PowerShell\ModuleLogging" "EnableModuleLogging" 1
+
+# ===============================
+# SERVICES
+# ===============================
+Write-Host "`n--- Services ---" -ForegroundColor Cyan
+Test-Service "RemoteRegistry" "Disabled"
+Test-Service "FTPSVC" "Disabled"
+
+# ===============================
+# WINDOWS UPDATE
+# ===============================
+Write-Host "`n--- Windows Update ---" -ForegroundColor Cyan
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU" "NoAutoUpdate" 0
+Test-Reg "HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU" "AUOptions" 4
+
+Write-Host "`n=== Verification Complete ===`n" -ForegroundColor Cyan
